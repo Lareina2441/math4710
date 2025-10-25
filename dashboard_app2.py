@@ -1,278 +1,277 @@
-# app.py
-from dash import Dash, dcc, html, callback, Input, Output
+from plotly.data import gapminder
+from dash import dcc, html, Dash, callback, Input, Output
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
-# ----- app & css -----
+# External CSS (Bootstrap)
 css = ["https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css"]
-app = Dash(__name__, external_stylesheets=css)
-server = app.server
+app = Dash(name="Gapminder Dashboard", external_stylesheets=css)
 
-# ----- data -----
-gapminder_df = px.data.gapminder()  # 内置 gapminder 数据
-# 规范列名为更易读的形式
+################### DATASET ####################################
+# 使用 gapminder()（注意：你原先使用了 gapminder(datetimes=True, centroids=True, pretty_names=True)）
+# 保持兼容性：为确保 datetimes 可用，按你的环境选择相应调用；这里示例使用基本 gapminder()
+gapminder_df = gapminder()
+# 标准化列名（根据你原数据的列名）
+# 如果你的 gapminder 返回的是其他列名，请调整下面的列名映射
 gapminder_df = gapminder_df.rename(columns={
-    "country": "Country",
-    "continent": "Continent",
-    "year": "Year",
+    "gdpPercap": "GDP per Capita",
     "lifeExp": "Life Expectancy",
     "pop": "Population",
-    "gdpPercap": "GDP per Capita",
-    "iso_alpha": "ISO-3"
-})
-# 有的 plotly 版本可能没有 iso_alpha 列：如果缺少则生成 NaN（choropleth 可能不全）
-if "ISO-3" not in gapminder_df.columns:
-    gapminder_df["ISO-3"] = None
+    "continent": "Continent",
+    "country": "Country",
+    "year": "Year",
+    "iso_alpha": "ISO Alpha Country Code"
+}, errors="ignore")
 
-continents = sorted(gapminder_df.Continent.unique().tolist())
-years = sorted(gapminder_df.Year.unique().tolist())
+# 如果 Year 是数值，确保为 int
+if pd.api.types.is_datetime64_any_dtype(gapminder_df.get("Year")):
+    gapminder_df["Year"] = gapminder_df["Year"].dt.year
+gapminder_df["Year"] = gapminder_df["Year"].astype(int)
 
-# ----- figure factories -----
-def create_table_figure(df: pd.DataFrame, height=400):
-    # 使用 go.Table 来显示（和你原代码风格接近）
-    header_vals = list(df.columns)
-    cell_vals = [df[col].astype(str).tolist() for col in df.columns]
+#################### STYLING / COLOR PALETTES ##################
+# 统一样式：使用 plotly_white 模板 + 柔和色板
+DEFAULT_TEMPLATE = "plotly_white"
+CATEGORY_COLORS = px.colors.qualitative.Pastel  # 柔和类别色板
+CONTINUOUS_MAP = "Viridis"  # 连续色标（choropleth）
+
+COMMON_LAYOUT_KWARGS = dict(
+    template=DEFAULT_TEMPLATE,
+    font=dict(family="Inter, Arial, sans-serif", size=12),
+)
+
+#################### CHARTS #####################################
+def create_table():
+    # 使用 go.Table 并美化表头与交替行色
+    header_fill = "#0d6efd"  # bootstrap primary
+    header_font_color = "white"
+    cell_fill1 = "#ffffff"
+    cell_fill2 = "#f6f8fb"
+
     fig = go.Figure(data=[go.Table(
-        header=dict(values=header_vals, align='left', fill_color="#dfe6f0"),
-        cells=dict(values=cell_vals, align='left')
+        header=dict(values=list(gapminder_df.columns),
+                    fill_color=header_fill,
+                    font=dict(color=header_font_color, size=13),
+                    align='left'),
+        cells=dict(values=[gapminder_df[col] for col in gapminder_df.columns],
+                   fill_color=[ [cell_fill1, cell_fill2] * (len(gapminder_df)//2 + 1) ],
+                   align='left',
+                   font=dict(color="#222222", size=11))
     )])
-    fig.update_layout(margin={"t": 0, "l": 0, "r": 0, "b": 0}, height=height, paper_bgcolor="#ffffff")
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", margin={"t":10, "l":0, "r":0, "b":0}, height=700, **COMMON_LAYOUT_KWARGS)
     return fig
 
 def create_population_chart(continent="Asia", year=1952):
-    filtered_df = gapminder_df[(gapminder_df.Continent == continent) & (gapminder_df.Year == int(year))]
+    filtered_df = gapminder_df[(gapminder_df.Continent==continent) & (gapminder_df.Year==year)]
     filtered_df = filtered_df.sort_values(by="Population", ascending=False).head(15)
+
     fig = px.bar(filtered_df, x="Country", y="Population", color="Country",
-                 title=f"Top 15 Population — {continent} — {year}", text_auto=True)
-    fig.update_layout(paper_bgcolor="#e5ecf6", height=500, margin={"t":40})
+                 title=f"Population — {continent} — {year}",
+                 text_auto=True,
+                 color_discrete_sequence=CATEGORY_COLORS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)",
+                      height=520,
+                      margin={"t":40, "l":10, "r":10, "b":10},
+                      template=DEFAULT_TEMPLATE,
+                      font=dict(family="Inter, Arial, sans-serif", size=12))
+    fig.update_traces(marker_line_width=0.5)
     return fig
+
 
 def create_gdp_chart(continent="Asia", year=1952):
-    filtered_df = gapminder_df[(gapminder_df.Continent == continent) & (gapminder_df.Year == int(year))]
+    filtered_df = gapminder_df[(gapminder_df.Continent==continent) & (gapminder_df.Year==year)]
     filtered_df = filtered_df.sort_values(by="GDP per Capita", ascending=False).head(15)
+
     fig = px.bar(filtered_df, x="Country", y="GDP per Capita", color="Country",
-                 title=f"Top 15 GDP per Capita — {continent} — {year}", text_auto=True)
-    fig.update_layout(paper_bgcolor="#e5ecf6", height=500, margin={"t":40})
+                 title=f"GDP per Capita — {continent} — {year}",
+                 text_auto=True,
+                 color_discrete_sequence=CATEGORY_COLORS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)",
+                      height=520,
+                      margin={"t":40, "l":10, "r":10, "b":10},
+                      template=DEFAULT_TEMPLATE,
+                      font=dict(family="Inter, Arial, sans-serif", size=12))
+    fig.update_traces(marker_line_width=0.5)
     return fig
+
 
 def create_life_exp_chart(continent="Asia", year=1952):
-    filtered_df = gapminder_df[(gapminder_df.Continent == continent) & (gapminder_df.Year == int(year))]
+    filtered_df = gapminder_df[(gapminder_df.Continent==continent) & (gapminder_df.Year==year)]
     filtered_df = filtered_df.sort_values(by="Life Expectancy", ascending=False).head(15)
+
     fig = px.bar(filtered_df, x="Country", y="Life Expectancy", color="Country",
-                 title=f"Top 15 Life Expectancy — {continent} — {year}", text_auto=True)
-    fig.update_layout(paper_bgcolor="#e5ecf6", height=500, margin={"t":40})
+                 title=f"Life Expectancy — {continent} — {year}",
+                 text_auto=True,
+                 color_discrete_sequence=CATEGORY_COLORS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)",
+                      height=520,
+                      margin={"t":40, "l":10, "r":10, "b":10},
+                      template=DEFAULT_TEMPLATE,
+                      font=dict(family="Inter, Arial, sans-serif", size=12))
+    fig.update_traces(marker_line_width=0.5)
     return fig
 
-def create_choropleth_map(variable="Life Expectancy", year=1952):
-    # 变量映射
-    var_map = {
-        "Population": "Population",
-        "GDP per Capita": "GDP per Capita",
-        "Life Expectancy": "Life Expectancy"
-    }
-    col = var_map.get(variable, variable)
-    filtered_df = gapminder_df[gapminder_df.Year == int(year)].copy()
-    # 若没有 ISO-3 列，用 Country 名称（效果差一些，但避免报错）
-    if filtered_df.get("ISO-3").notna().any():
-        locations = "ISO-3"
-        locationmode = "ISO-3"
-    else:
-        locations = "Country"
-        locationmode = None  # plotly 会尝试匹配国家名
 
+def create_choropleth_map(variable, year):
+    filtered_df = gapminder_df[gapminder_df.Year==year]
     fig = px.choropleth(filtered_df,
-                        locations=locations,
-                        color=col,
-                        hover_name="Country",
-                        title=f"{col} Choropleth — {year}",
-                        color_continuous_scale="RdYlBu")
-    fig.update_layout(paper_bgcolor="#e5ecf6", height=500, margin={"t":40})
+                        color=variable,
+                        locations="ISO Alpha Country Code",
+                        locationmode="ISO-3",
+                        color_continuous_scale=CONTINUOUS_MAP,
+                        hover_data=["Country", variable],
+                        title=f"{variable} Choropleth — {year}")
+    fig.update_layout(dragmode=False,
+                      paper_bgcolor="rgba(0,0,0,0)",
+                      height=520,
+                      margin={"l":0, "r":0, "b":0, "t":40},
+                      template=DEFAULT_TEMPLATE,
+                      font=dict(family="Inter, Arial, sans-serif", size=12))
     return fig
 
-# ----- layout -----
+##################### WIDGETS ####################################
+continents = sorted(gapminder_df.Continent.unique())
+years = sorted(gapminder_df.Year.unique())
+
+def mk_dropdown(id, options, value):
+    return dcc.Dropdown(id=id, options=[{"label": o, "value": o} for o in options], value=value, clearable=False, style={"minWidth":"160px"})
+
+cont_population = mk_dropdown("cont_pop", continents, "Asia")
+year_population = mk_dropdown("year_pop", years, years[0])
+
+cont_gdp = mk_dropdown("cont_gdp", continents, "Asia")
+year_gdp = mk_dropdown("year_gdp", years, years[0])
+
+cont_life_exp = mk_dropdown("cont_life_exp", continents, "Asia")
+year_life_exp = mk_dropdown("year_life_exp", years, years[0])
+
+year_map = mk_dropdown("year_map", years, years[0])
+var_map = mk_dropdown("var_map", ["Population", "GDP per Capita", "Life Expectancy"], "Life Expectancy")
+
+##################### APP LAYOUT ####################################
 app.layout = html.Div([
     html.Div([
-        html.H1("Gapminder Dashboard", className="text-center fw-bold my-3"),
-        html.Div(className="row", children=[
-            # 左侧菜单
-            html.Div(className="col-3", children=[
+        html.H1("Gapminder Dataset Analysis", className="text-center fw-bold m-2"),
+        html.P("Made it more colorful and added a download button", className="text-center text-muted mb-3"),
+        dcc.Tabs([
+            dcc.Tab([
+                html.Br(),
                 html.Div([
-                    html.H5("Views", className="fw-bold"),
-                    dcc.RadioItems(
-                        id="view-selector",
-                        options=[
-                            {"label": "Dataset", "value": "Dataset"},
-                            {"label": "Population", "value": "Population"},
-                            {"label": "GDP per Capita", "value": "GDP"},
-                            {"label": "Life Expectancy", "value": "Life"},
-                            {"label": "Choropleth Map", "value": "Map"},
-                        ],
-                        value="Dataset",
-                        labelStyle={"display": "block", "padding": "6px 0"}
-                    ),
-                    html.Hr(),
-                    html.Div(id="help-text", children="点击左侧视图可切换并显示对应下拉菜单与表格/图表。")
-                ], style={"position": "sticky", "top": "10px"})
-            ]),
-            # 右侧主区
-            html.Div(className="col-9", children=[
-                # 动态控件区域（根据视图显示不同下拉）
-                html.Div(id="controls-div", className="mb-3"),
-                # 主图表区域
-                dcc.Graph(id="main-graph"),
-                html.Hr(),
-                html.H5("Data (table)"),
-                dcc.Graph(id="dataset-graph")
-            ])
+                    html.Div([
+                        html.Button("Download full dataset (CSV)", id="btn-download-dataset", className="btn btn-sm btn-primary me-2"),
+                        dcc.Download(id="download-dataset")
+                    ], className="mb-2"),
+                    dcc.Graph(id="dataset", figure=create_table())
+                ])
+            ], label="Dataset"),
+            dcc.Tab([
+                html.Br(),
+                html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                    html.Div(["Continent", cont_population], style={"marginRight":"12px"}),
+                    html.Div(["Year", year_population]),
+                    html.Div(html.Button("Download visible (CSV)", id="btn-download-pop", className="btn btn-sm btn-outline-primary ms-3")),
+                    dcc.Download(id="download-pop")
+                ]),
+                dcc.Graph(id="population", figure=create_population_chart())
+            ], label="Population"),
+            dcc.Tab([
+                html.Br(),
+                html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                    html.Div(["Continent", cont_gdp], style={"marginRight":"12px"}),
+                    html.Div(["Year", year_gdp]),
+                    html.Div(html.Button("Download visible (CSV)", id="btn-download-gdp", className="btn btn-sm btn-outline-primary ms-3")),
+                    dcc.Download(id="download-gdp")
+                ]),
+                dcc.Graph(id="gdp", figure=create_gdp_chart())
+            ], label="GDP Per Capita"),
+            dcc.Tab([
+                html.Br(),
+                html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                    html.Div(["Continent", cont_life_exp], style={"marginRight":"12px"}),
+                    html.Div(["Year", year_life_exp]),
+                    html.Div(html.Button("Download visible (CSV)", id="btn-download-life", className="btn btn-sm btn-outline-primary ms-3")),
+                    dcc.Download(id="download-life")
+                ]),
+                dcc.Graph(id="life_expectancy", figure=create_life_exp_chart())
+            ], label="Life Expectancy"),
+            dcc.Tab([
+                html.Br(),
+                html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                    html.Div(["Variable", var_map], style={"marginRight":"12px"}),
+                    html.Div(["Year", year_map]),
+                    html.Div(html.Button("Download visible (CSV)", id="btn-download-map", className="btn btn-sm btn-outline-primary ms-3")),
+                    dcc.Download(id="download-map")
+                ]),
+                dcc.Graph(id="choropleth_map", figure=create_choropleth_map("Life Expectancy", years[0]))
+            ], label="Choropleth Map"),
         ])
-    ], className="container-fluid", style={"background-color": "#e5ecf6", "minHeight": "95vh", "padding": "20px"})
-])
+    ], className="col-10 mx-auto p-4 shadow-sm rounded", style={
+        "background":"linear-gradient(180deg,#f8fafc 0%, #e9f0fb 100%)",
+        "marginTop":"18px"
+    })
+], style={"background-color": "#dfeefb", "minHeight": "100vh"})
 
-# ----- callbacks -----
-@callback(
-    Output("controls-div", "children"),
-    Input("view-selector", "value")
-)
-def render_controls(view):
-    """根据左侧菜单渲染对应下拉菜单（显示/隐藏逻辑由此完成）。"""
-    # 通用下拉组件生成函数
-    def continent_dd(id_):
-        return dcc.Dropdown(id=id_, options=[{"label": c, "value": c} for c in continents],
-                            value=continents[0], clearable=False, style={"width": "220px", "display": "inline-block", "marginRight":"10px"})
+##################### CALLBACKS: UPDATE CHARTS ####################################
+@callback(Output("population", "figure"), [Input("cont_pop", "value"), Input("year_pop", "value")])
+def update_population_chart(continent, year):
+    return create_population_chart(continent, year)
 
-    def year_dd(id_):
-        return dcc.Dropdown(id=id_, options=[{"label": y, "value": y} for y in years],
-                            value=years[0], clearable=False, style={"width": "140px", "display": "inline-block", "marginRight":"10px"})
+@callback(Output("gdp", "figure"), [Input("cont_gdp", "value"), Input("year_gdp", "value")])
+def update_gdp_chart(continent, year):
+    return create_gdp_chart(continent, year)
 
-    if view == "Dataset":
-        # 仅显示说明或可选的过滤（这里我们显示年份过滤做示范）
-        return html.Div([
-            html.Span("（Dataset）显示完整数据或按年份过滤：", className="me-2"),
-            year_dd("dataset_year")
-        ])
-    elif view == "Population":
-        return html.Div([
-            html.Span("Continent: ", className="me-2"),
-            continent_dd("cont_pop"),
-            html.Span("Year: ", className="me-2"),
-            year_dd("year_pop")
-        ])
-    elif view == "GDP":
-        return html.Div([
-            html.Span("Continent: ", className="me-2"),
-            continent_dd("cont_gdp"),
-            html.Span("Year: ", className="me-2"),
-            year_dd("year_gdp")
-        ])
-    elif view == "Life":
-        return html.Div([
-            html.Span("Continent: ", className="me-2"),
-            continent_dd("cont_life"),
-            html.Span("Year: ", className="me-2"),
-            year_dd("year_life")
-        ])
-    elif view == "Map":
-        return html.Div([
-            dcc.Dropdown(id="var_map", options=[
-                {"label": "Population", "value": "Population"},
-                {"label": "GDP per Capita", "value": "GDP per Capita"},
-                {"label": "Life Expectancy", "value": "Life Expectancy"}],
-                value="Life Expectancy", clearable=False, style={"width":"220px", "display":"inline-block", "marginRight":"10px"}),
-            html.Span("Year: ", className="me-2"),
-            dcc.Dropdown(id="year_map", options=[{"label": y, "value": y} for y in years],
-                         value=years[0], clearable=False, style={"width":"140px", "display":"inline-block"})
-        ])
-    else:
-        return html.Div()  # never hits
+@callback(Output("life_expectancy", "figure"), [Input("cont_life_exp", "value"), Input("year_life_exp", "value")])
+def update_life_exp_chart(continent, year):
+    return create_life_exp_chart(continent, year)
 
-# 主图和表格的更新：将根据当前视图与控件值更新
-@callback(
-    Output("main-graph", "figure"),
-    Output("dataset-graph", "figure"),
-    Input("view-selector", "value"),
-    # 下面是所有可能会被渲染出来的控件（即使未渲染，其值也会传入；Dash 在未挂载元素时不会提供值，
-    # 所以使用防守式取值）
-    Input("cont_pop", "value"),
-    Input("year_pop", "value"),
-    Input("cont_gdp", "value"),
-    Input("year_gdp", "value"),
-    Input("cont_life", "value"),
-    Input("year_life", "value"),
-    Input("var_map", "value"),
-    Input("year_map", "value"),
-    Input("dataset_year", "value"),
-)
-def update_main_and_table(view,
-                          cont_pop, year_pop,
-                          cont_gdp, year_gdp,
-                          cont_life, year_life,
-                          var_map, year_map,
-                          dataset_year):
-    # default figures (empty)
-    empty_fig = go.Figure()
-    empty_fig.update_layout(height=400, paper_bgcolor="#e5ecf6")
-    # 默认表格为完整 dataset
-    table_fig = create_table_figure(gapminder_df, height=400)
+@callback(Output("choropleth_map", "figure"), [Input("var_map", "value"), Input("year_map", "value")])
+def update_map(var_map, year):
+    return create_choropleth_map(var_map, year)
 
-    # defensive fallbacks: 如果 None 则使用首个值
-    if year_pop is None and len(years)>0: year_pop = years[0]
-    if year_gdp is None and len(years)>0: year_gdp = years[0]
-    if year_life is None and len(years)>0: year_life = years[0]
-    if year_map is None and len(years)>0: year_map = years[0]
-    if dataset_year is None and len(years)>0: dataset_year = years[0]
-    if cont_pop is None and len(continents)>0: cont_pop = continents[0]
-    if cont_gdp is None and len(continents)>0: cont_gdp = continents[0]
-    if cont_life is None and len(continents)>0: cont_life = continents[0]
-    if var_map is None: var_map = "Life Expectancy"
+##################### CALLBACKS: DOWNLOADS ####################################
+# Full dataset download
+@callback(Output("download-dataset", "data"), [Input("btn-download-dataset", "n_clicks")])
+def download_full_dataset(n_clicks):
+    if not n_clicks:
+        return None
+    return dcc.send_data_frame(gapminder_df.to_csv, "gapminder_full.csv", index=False)
 
-    # 根据视图选择主图和表格展示内容
-    try:
-        if view == "Dataset":
-            # 如果选择按年份过滤 dataset，则展示该年的全部数据，否则全部数据
-            df = gapminder_df.copy()
-            if dataset_year:
-                df = df[df.Year == int(dataset_year)]
-            table_fig = create_table_figure(df, height=500)
-            main_fig = create_table_figure(df, height=500)  # 主区也可以显示同一个表格（或设置为 empty）
-            return main_fig, table_fig
+# Population tab download (current filters)
+@callback(Output("download-pop", "data"),
+          [Input("btn-download-pop", "n_clicks"), Input("cont_pop", "value"), Input("year_pop", "value")])
+def download_population(n_clicks, continent, year):
+    if not n_clicks:
+        return None
+    df = gapminder_df[(gapminder_df.Continent==continent) & (gapminder_df.Year==year)].sort_values(by="Population", ascending=False)
+    return dcc.send_data_frame(df.to_csv, f"population_{continent}_{year}.csv", index=False)
 
-        elif view == "Population":
-            main_fig = create_population_chart(cont_pop, year_pop)
-            # 表格：展示被用于绘图的条目（前 15）
-            df = gapminder_df[(gapminder_df.Continent == cont_pop) & (gapminder_df.Year == int(year_pop))]
-            df = df.sort_values("Population", ascending=False).head(15)
-            table_fig = create_table_figure(df, height=320)
-            return main_fig, table_fig
+# GDP tab download
+@callback(Output("download-gdp", "data"),
+          [Input("btn-download-gdp", "n_clicks"), Input("cont_gdp", "value"), Input("year_gdp", "value")])
+def download_gdp(n_clicks, continent, year):
+    if not n_clicks:
+        return None
+    df = gapminder_df[(gapminder_df.Continent==continent) & (gapminder_df.Year==year)].sort_values(by="GDP per Capita", ascending=False)
+    return dcc.send_data_frame(df.to_csv, f"gdp_{continent}_{year}.csv", index=False)
 
-        elif view == "GDP":
-            main_fig = create_gdp_chart(cont_gdp, year_gdp)
-            df = gapminder_df[(gapminder_df.Continent == cont_gdp) & (gapminder_df.Year == int(year_gdp))]
-            df = df.sort_values("GDP per Capita", ascending=False).head(15)
-            table_fig = create_table_figure(df, height=320)
-            return main_fig, table_fig
+# Life Expectancy tab download
+@callback(Output("download-life", "data"),
+          [Input("btn-download-life", "n_clicks"), Input("cont_life_exp", "value"), Input("year_life_exp", "value")])
+def download_life(n_clicks, continent, year):
+    if not n_clicks:
+        return None
+    df = gapminder_df[(gapminder_df.Continent==continent) & (gapminder_df.Year==year)].sort_values(by="Life Expectancy", ascending=False)
+    return dcc.send_data_frame(df.to_csv, f"life_expectancy_{continent}_{year}.csv", index=False)
 
-        elif view == "Life":
-            main_fig = create_life_exp_chart(cont_life, year_life)
-            df = gapminder_df[(gapminder_df.Continent == cont_life) & (gapminder_df.Year == int(year_life))]
-            df = df.sort_values("Life Expectancy", ascending=False).head(15)
-            table_fig = create_table_figure(df, height=320)
-            return main_fig, table_fig
+# Map tab download (variable + year)
+@callback(Output("download-map", "data"),
+          [Input("btn-download-map", "n_clicks"), Input("var_map", "value"), Input("year_map", "value")])
+def download_map(n_clicks, var, year):
+    if not n_clicks:
+        return None
+    df = gapminder_df[gapminder_df.Year==year][["Country", "Continent", "Year", var, "ISO Alpha Country Code"]]
+    return dcc.send_data_frame(df.to_csv, f"choropleth_{var.replace(' ','_')}_{year}.csv", index=False)
 
-        elif view == "Map":
-            main_fig = create_choropleth_map(var_map, year_map)
-            df = gapminder_df[gapminder_df.Year == int(year_map)]
-            # 表格：展示用于地图的该年全部数据的前 50 条（避免过长）
-            table_fig = create_table_figure(df.head(50), height=300)
-            return main_fig, table_fig
-
-        else:
-            return empty_fig, table_fig
-    except Exception as e:
-        # 出错时显示空图并在表格里显示错误信息（便于 debug）
-        err_df = pd.DataFrame({"Error": [str(e)]})
-        return empty_fig, create_table_figure(err_df, height=200)
-
-# ----- run -----
+##################### RUN ####################################
 if __name__ == "__main__":
     app.run(debug=True)
